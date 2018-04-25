@@ -22,8 +22,7 @@ def get_edge(client_session, edge_name):
     return edge_id, edge_params
 
 
-def create_nat_rule(client_session, edge_name, nat_enabled, loggingEnabled, action, vnic, originalAddress, translatedAddress,
-                    matchAddress, protocol, icmpType, originalPort, translatedPort, matchPort, ruleTag, description):
+def create_nat_rule(client_session, module):
     """
     :param enabled: Enable rule. Boolean. Default is true.
     :param loggingEnabled: Enable logging. Default is false.
@@ -41,36 +40,12 @@ def create_nat_rule(client_session, edge_name, nat_enabled, loggingEnabled, acti
     :param description: user-generated description field
     :return: Returns true or false.
     """
-    edge_id, edge_params = get_edge(client_session, edge_name)
+    edge_id, edge_params = get_edge(client_session, module.params['name'])
 
-    if action == 'snat':
-        nat_rule_dict = { 'natRules':
-                            { 'natRule':
-                                {'action': action, 'vnic': vnic, 'originalAddress': originalAddress,
-                                 'translatedAddress': translatedAddress, 'loggingEnabled': loggingEnabled,
-                                 'enabled': nat_enabled, 'protocol': protocol, 'originalPort': originalPort,
-                                 'translatedPort': translatedPort, 'snatMatchDestinationAddress': matchAddress,
-                                 'snatMatchDestinationPort': matchPort, 'description': description
-                                }
-                            }
-                        }
+    nat_rule_dict = {}
+    nat_rule_dict['natRules'] = create_init_nat_rules(client_session, module)
 
-    elif action == 'dnat':
-        nat_rule_dict = { 'natRules':
-                            { 'natRule':
-                                {'action': action, 'vnic': vnic, 'originalAddress': originalAddress,
-                                 'translatedAddress': translatedAddress, 'loggingEnabled': loggingEnabled,
-                                 'enabled': nat_enabled, 'protocol': protocol, 'originalPort': originalPort,
-                                 'translatedPort': translatedPort, 'dnatMatchSourceAddress': matchAddress,
-                                 'dnatMatchSourcePort': matchPort, 'description': description
-                                }
-                            }
-                        }
-
-    if protocol == 'icmp':
-        nat_rule_dict['natRules']['natRule']['icmpType'] = icmpType
-    if ruleTag is not None:
-        nat_rule_dict['natRules']['natRule']['ruleTag'] = ruleTag
+    #dumpclean(nat_rule_dict)
 
     cfg_result = client_session.update('edgeNat', uri_parameters={'edgeId': edge_id}, request_body_dict={'nat': nat_rule_dict})
 
@@ -79,7 +54,74 @@ def create_nat_rule(client_session, edge_name, nat_enabled, loggingEnabled, acti
     else:
         return False
 
-def append_nat_rules(client_session, edge_name, nat_enabled, loggingEnabled, action, vnic, originalAddress, translatedAddress,
+def create_init_nat_rules(client_session, module):
+    """
+    Create single dictionary with all of the NAT rules, both SNAT and DNAT, to be used
+    in a single API call. Should be used when wiping out ALL existing rules or when
+    a new NSX Edge is created.
+    :return: return dictionary with the full NAT rules list
+    """
+    nat_rules = module.params['rules']
+    params_check_nat_rules(module)
+    nat_rules_info = []
+
+    for rule_key, nat_rule in nat_rules.items():
+        rules_index = rule_key[-1:]
+        rule_type = nat_rule['rule_type']
+        if rule_type == 'snat':
+            nat_rules_info.append({'natRule': 
+                                    {'action': rule_type, 'vnic': nat_rule['vnic'], 'originalAddress': nat_rule['originalAddress'],
+                                     'translatedAddress': nat_rule['translatedAddress'], 'loggingEnabled': nat_rule['loggingEnabled'],
+                                     'enabled': nat_rule['nat_enabled'], 'protocol': nat_rule['protocol'], 'originalPort': nat_rule['originalPort'],
+                                     'translatedPort': nat_rule['translatedPort'], 'snatMatchDestinationAddress': nat_rule['snatMatchDestinationAddress'],
+                                     'snatMatchDestinationPort': nat_rule['snatMatchDestinationPort'], 'description': nat_rule['description']
+                                    }
+                                  })
+        elif rule_type == 'dnat':
+            nat_rules_info.append({'natRule':
+                                    {'action': rule_type, 'vnic': nat_rule['vnic'], 'originalAddress': nat_rule['originalAddress'],
+                                     'translatedAddress': nat_rule['translatedAddress'], 'loggingEnabled': nat_rule['loggingEnabled'],
+                                     'enabled': nat_rule['nat_enabled'], 'protocol': nat_rule['protocol'], 'originalPort': nat_rule['originalPort'],
+                                     'translatedPort': nat_rule['translatedPort'], 'dnatMatchSourceAddress': nat_rule['dnatMatchSourceAddress'],
+                                     'dnatMatchSourcePort': nat_rule['dnatMatchSourcePort'], 'description': nat_rule['description']
+                                    }
+                                  })
+
+        if nat_rule['protocol'] == 'icmp':
+            nat_rules_info['natRule']['icmpType'] = nat_rule['icmpType']
+
+    return nat_rules_info
+
+def params_check_nat_rules(module):
+    nat_rules = module.params['rules']
+    if not isinstance(nat_rules, dict):
+        module.fail_json(msg='Malformed NAT Rules dictionary')
+    for rule_key, nat_rule in nat_rules.items():
+        if not isinstance(nat_rule, dict):
+            module.fail_json(msg='Malformed NAT Rule dictionary: {}'.format(rule_key))
+        rule_type = nat_rule.get('rule_type', None)
+
+def dumpclean(obj):
+    """
+    https://stackoverflow.com/questions/15785719/how-to-print-a-dictionary-line-by-line-in-python
+    """
+    if type(obj) == dict:
+        for k, v in obj.items():
+            if hasattr(v, '__iter__'):
+                print k
+                dumpclean(v)
+            else:
+                print '%s : %s' % (k, v)
+    elif type(obj) == list:
+        for v in obj:
+            if hasattr(v, '__iter__'):
+                dumpclean(v)
+            else:
+                print v
+    else:
+        print obj
+
+def append_nat_rules(client_session, edge_name, nat_enabled, loggingEnabled, rule_type, vnic, originalAddress, translatedAddress,
                     matchAddress, protocol, icmpType, originalPort, translatedPort, matchPort, ruleTag, description):
     """
     :param enabled: Enable rule. Boolean. Default is true.
@@ -100,9 +142,9 @@ def append_nat_rules(client_session, edge_name, nat_enabled, loggingEnabled, act
     """
     edge_id, edge_params = get_edge(client_session, edge_name)
 
-    if action == 'snat':
+    if rule_type == 'snat':
         nat_rule_dict = { 'natRule':
-                            {'action': action, 'vnic': vnic, 'originalAddress': originalAddress,
+                            {'action': rule_type, 'vnic': vnic, 'originalAddress': originalAddress,
                              'translatedAddress': translatedAddress, 'loggingEnabled': loggingEnabled,
                              'enabled': nat_enabled, 'protocol': protocol, 'originalPort': originalPort,
                              'translatedPort': translatedPort, 'snatMatchDestinationAddress': matchAddress,
@@ -110,9 +152,9 @@ def append_nat_rules(client_session, edge_name, nat_enabled, loggingEnabled, act
                             }
                         }
 
-    elif action == 'dnat':
+    elif rule_type == 'dnat':
         nat_rule_dict = { 'natRule':
-                            {'action': action, 'vnic': vnic, 'originalAddress': originalAddress,
+                            {'action': rule_type, 'vnic': vnic, 'originalAddress': originalAddress,
                              'translatedAddress': translatedAddress, 'loggingEnabled': loggingEnabled,
                              'enabled': nat_enabled, 'protocol': protocol, 'originalPort': originalPort,
                              'translatedPort': translatedPort, 'dnatMatchSourceAddress': matchAddress,
@@ -171,7 +213,8 @@ def main():
                 dnatMatchSourcePort=dict(default='any'),
                 snatMatchDestinationPort=dict(default='any'),
                 ruleTag=dict(default=None),
-                ruleId=dict()
+                ruleId=dict(),
+                rules=dict(required=False, type='dict')
             ),
             supports_check_mode=False
     )
@@ -186,24 +229,10 @@ def main():
     edge_id, edge_params = get_edge(client_session, module.params['name'])
 
     if module.params['mode'] == 'create':
-        if module.params['rule_type'] == 'snat':
-            changed = create_nat_rule(client_session, module.params['name'], module.params['nat_enabled'],
-                                      module.params['loggingEnabled'], module.params['rule_type'], module.params['vnic'],
-                                      module.params['originalAddress'], module.params['translatedAddress'],
-                                      module.params['snatMatchDestinationAddress'], module.params['protocol'],
-                                      module.params['icmpType'], module.params['originalPort'], module.params['translatedPort'],
-                                      module.params['snatMatchDestinationPort'], module.params['ruleTag'],
-                                      module.params['description']
-                                     )
-        if module.params['rule_type'] == 'dnat':
-            changed = create_nat_rule(client_session, module.params['name'], module.params['nat_enabled'],
-                                      module.params['loggingEnabled'], module.params['rule_type'], module.params['vnic'],
-                                      module.params['originalAddress'], module.params['translatedAddress'],
-                                      module.params['dnatMatchSourceAddress'], module.params['protocol'],
-                                      module.params['icmpType'], module.params['originalPort'], module.params['translatedPort'],
-                                      module.params['dnatMatchSourcePort'], module.params['ruleTag'],
-                                      module.params['description']
-                                     )
+        if module.params['rules'] is not None:
+            changed = create_nat_rule(client_session, module)
+        else:
+                changed = False
     elif module.params['mode'] == 'delete':
         changed = delete_nat_rule(client_session, module.params['name'], module.params['ruleId'])
     elif module.params['mode'] == 'append':
