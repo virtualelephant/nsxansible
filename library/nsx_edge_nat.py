@@ -45,7 +45,7 @@ def create_nat_rule(client_session, module):
     nat_rule_dict = {}
     nat_rule_dict['natRules'] = create_init_nat_rules(client_session, module)
 
-    #dumpclean(nat_rule_dict)
+    dumpclean(nat_rule_dict)
 
     cfg_result = client_session.update('edgeNat', uri_parameters={'edgeId': edge_id}, request_body_dict={'nat': nat_rule_dict})
 
@@ -63,29 +63,31 @@ def create_init_nat_rules(client_session, module):
     """
     nat_rules = module.params['rules']
     params_check_nat_rules(module)
-    nat_rules_info = []
+
+    nat_rules_info = {}
+    nat_rules_info['natRule'] = []
 
     for rule_key, nat_rule in nat_rules.items():
         rules_index = rule_key[-1:]
         rule_type = nat_rule['rule_type']
         if rule_type == 'snat':
-            nat_rules_info.append({'natRule': 
+            nat_rules_info['natRule'].append(
                                     {'action': rule_type, 'vnic': nat_rule['vnic'], 'originalAddress': nat_rule['originalAddress'],
                                      'translatedAddress': nat_rule['translatedAddress'], 'loggingEnabled': nat_rule['loggingEnabled'],
                                      'enabled': nat_rule['nat_enabled'], 'protocol': nat_rule['protocol'], 'originalPort': nat_rule['originalPort'],
                                      'translatedPort': nat_rule['translatedPort'], 'snatMatchDestinationAddress': nat_rule['snatMatchDestinationAddress'],
                                      'snatMatchDestinationPort': nat_rule['snatMatchDestinationPort'], 'description': nat_rule['description']
                                     }
-                                  })
+                                  )
         elif rule_type == 'dnat':
-            nat_rules_info.append({'natRule':
+            nat_rules_info['natRule'].append(
                                     {'action': rule_type, 'vnic': nat_rule['vnic'], 'originalAddress': nat_rule['originalAddress'],
                                      'translatedAddress': nat_rule['translatedAddress'], 'loggingEnabled': nat_rule['loggingEnabled'],
                                      'enabled': nat_rule['nat_enabled'], 'protocol': nat_rule['protocol'], 'originalPort': nat_rule['originalPort'],
                                      'translatedPort': nat_rule['translatedPort'], 'dnatMatchSourceAddress': nat_rule['dnatMatchSourceAddress'],
                                      'dnatMatchSourcePort': nat_rule['dnatMatchSourcePort'], 'description': nat_rule['description']
                                     }
-                                  })
+                                  )
 
         if nat_rule['protocol'] == 'icmp':
             nat_rules_info['natRule']['icmpType'] = nat_rule['icmpType']
