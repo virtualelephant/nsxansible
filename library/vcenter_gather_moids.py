@@ -30,7 +30,8 @@ VIM_TYPES = {'datacenter': [vim.Datacenter],
              'dvs_name': [vim.dvs.VmwareDistributedVirtualSwitch],
              'datastore_name': [vim.Datastore],
              'resourcepool_name': [vim.ResourcePool],
-             'portgroup_name': [vim.dvs.DistributedVirtualPortgroup, vim.Network]}
+             'portgroup_name': [vim.dvs.DistributedVirtualPortgroup, vim.Network],
+             'vm': [vim.VirtualMachine]}
 
 
 def get_mo(content, searchedname, vim_type_list):
@@ -41,6 +42,21 @@ def get_mo(content, searchedname, vim_type_list):
 	elif re.search( searchedname, object.name ):
             return object
     return None
+
+def get_mo_by_name(content, searchedname, vim_type):
+    mo_dict = get_all_objs(content, vim_type)
+    for obj in mo_dict:
+        if obj.name == searchedname:
+            return obj
+
+    return None
+
+def get_vm_by_name(content, vm_name):
+    vm_mo = get_mo_by_name(content, vm_name, VIM_TYPES['vm'])
+    if vm_mo:
+        return str(vm_mo._moId)
+    else:
+        return None
 
 def main():
 
@@ -59,8 +75,8 @@ def main():
 
     module = AnsibleModule(
         argument_spec=argument_spec,
-        required_one_of=[['cluster_name', 'portgroup_name', 'resourcepool_name', 'dvs_name', 'datastore_name']],
-        mutually_exclusive=[['cluster_name', 'portgroup_name', 'resourcepool_name', 'dvs_name', 'datastore_name']],
+        required_one_of=[['cluster_name', 'portgroup_name', 'resourcepool_name', 'dvs_name', 'datastore_name', 'vm']],
+        mutually_exclusive=[['cluster_name', 'portgroup_name', 'resourcepool_name', 'dvs_name', 'datastore_name', 'vm']],
         supports_check_mode=False
     )
 

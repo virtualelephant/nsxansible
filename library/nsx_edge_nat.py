@@ -45,8 +45,6 @@ def create_nat_rule(client_session, module):
     nat_rule_dict = {}
     nat_rule_dict['natRules'] = create_init_nat_rules(client_session, module)
 
-    dumpclean(nat_rule_dict)
-
     cfg_result = client_session.update('edgeNat', uri_parameters={'edgeId': edge_id}, request_body_dict={'nat': nat_rule_dict})
 
     if cfg_result['status'] == 204:
@@ -102,26 +100,6 @@ def params_check_nat_rules(module):
         if not isinstance(nat_rule, dict):
             module.fail_json(msg='Malformed NAT Rule dictionary: {}'.format(rule_key))
         rule_type = nat_rule.get('rule_type', None)
-
-def dumpclean(obj):
-    """
-    https://stackoverflow.com/questions/15785719/how-to-print-a-dictionary-line-by-line-in-python
-    """
-    if type(obj) == dict:
-        for k, v in obj.items():
-            if hasattr(v, '__iter__'):
-                print k
-                dumpclean(v)
-            else:
-                print '%s : %s' % (k, v)
-    elif type(obj) == list:
-        for v in obj:
-            if hasattr(v, '__iter__'):
-                dumpclean(v)
-            else:
-                print v
-    else:
-        print obj
 
 def append_nat_rules(client_session, edge_name, nat_enabled, loggingEnabled, rule_type, vnic, originalAddress, translatedAddress,
                     matchAddress, protocol, icmpType, originalPort, translatedPort, matchPort, ruleTag, description):

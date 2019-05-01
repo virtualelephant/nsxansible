@@ -31,7 +31,7 @@ __author__ = 'virtualelephant'
 
 def get_edge(client_session, edge_name):
     """
-    :param client session: An instance of an NsxClient Session
+    :param client_session: An instance of an NsxClient Session
     :param edge_name: The name of the edge searched
     :return: A tuple, with the first item being the edge or dlr id as string of the first Scope found with the
              right name and the second item being a dictionary of the logical parameters as return by the NSX API
@@ -45,6 +45,47 @@ def get_edge(client_session, edge_name):
         return None, None
 
     return edge_id, edge_params
+
+def get_vmId(client_session, edge_name, vm_name):
+    """
+    :param client_session: An instance of an NsxClient session
+    :param vm_name: The VM name to lookup ID for
+    :return: The vmId assigned to the VM from NSX
+    """
+    edge_id, edge_params = get_edge(client_session, edge_name)
+
+    if not edge_id:
+        return None
+
+    """
+    API url GET /api/2.0/services/securitygroup/scope/globalroot-0/members/VirtualMachine
+    <list>
+  <basicinfo>
+    <objectId>vm-503</objectId>
+    <objectTypeName>VirtualMachine</objectTypeName>
+    <vsmUuid>421CEDF5-3DAE-3892-0C23-12EA15E3A9BC</vsmUuid>
+    <nodeId>81a5fbab-fe06-4611-ba9f-34905d2565f8</nodeId>
+    <revision>9</revision>
+    <type>
+      <typeName>VirtualMachine</typeName>
+    </type>
+    <name>kube-dns-2</name>
+    <scope>
+      <id>domain-c7</id>
+      <objectTypeName>ClusterComputeResource</objectTypeName>
+      <name>Cluster01</name>
+    </scope>
+    <clientHandle/>
+    <extendedAttributes/>
+    <isUniversal>false</isUniversal>
+    <universalRevision>0</universalRevision>
+  </basicinfo>
+    """
+
+    if cfg_result['status'] == 204:
+        return True
+    else:
+        return False
 
 
 def add_dhcp_pool(client_session, edge_name, ip_range, default_gateway, subnet, domain_name,
@@ -125,7 +166,7 @@ def dhcp_server(client_session, edge_name, dhcp_enabled, syslog_enabled, syslog_
     if not change_needed:
         return True
     else:
-        result = client_session.update('dhcp', uri_parameter={'edgeId': edge_id}, request_body_dict=new_dhcp_config)
+        cfg_result = client_session.update('dhcp', uri_parameter={'edgeId': edge_id}, request_body_dict=new_dhcp_config)
 
         if cfg_result['status'] == 204:
             return True
@@ -133,12 +174,71 @@ def dhcp_server(client_session, edge_name, dhcp_enabled, syslog_enabled, syslog_
             return False
 
 
+def delete_dhcp_pool(client_session, edge_name, pool_id):
+    """
+    :param client_session: An instance of an NsxClient session
+    :param edge_name: The name of the edge searched
+    :param pool_id: The id of the pool to be deleted
+    :return: Returns True or None
+    """
+    edge_id, edge_params = get_edge(client_session, edge_name)
+
+    if not edge_id:
+        return None
+
+    cfg_result = client_session.delete('dhcpPoolID', url_parameters={'edgeId': edge_id, 'poolID': pool_id})
+
+    if cfg_result['status'] == 204:
+        return True
+    else:
+        return None
+
+def add_dhcp_static_binding(client_session, edge_name, vm_id, vnic_id, ip_addr, hostname, default_gateway, domain_name,
+                            dns_server_1, dns_server_2, lease_time, subnet):
+    """
+    :param client_session: An instance of an NsxClient session
+    :param edge_name: The name of the edge searched
+    :param vm_id: NSX VM ID to create binding for
+    :param vnic_id: vNIC to attach binding to
+    :param ip_addr: IP address for binding
+    :param hostname: hostname of the VM
+    :param default_gateway: Default route for binding
+    :param domain_name: FQDN
+    :param dns_server_1: primaryNameServer
+    :param dns_server_2: secondaryNameServer
+    :param lease_time: DHCP binding lease time
+    :return: Returns True or None
+    """
+    edge_id, edge_params = get_edge(client_session, edge_name)
+
+    if not edge_id:
+        return None
+
+    dhcp_binding_dict = {'vmId': vm_id,
+                         'vnicId': vnic_id,
+                         'hostname': hostname,
+                         'ipAddress': ip_addr,
+                         'defaultGateway': default_gateway,
+                         'domainName': domain_name,
+                         'primaryNameServer': dns_server_1,
+                         'secondaryNameServer': dns_server_2,
+                         'leastTime': lease_time,
+                         'autoConfigureDNS': auto_dns
+                         }
+
+    cfg_result = client_session.create('staticBindings', uri_parameters={'edgeId': edge_id}, request_body_dict={'staticBinding': dhcp_binding_dict})
+
+    if cfg_result['status'] == 204:
+        return True
+    else:
+        return None
+
 def main():
     module = AnsibleModule(
             argument_spec=dict(
                 nsxmanager_spec=dict(required=True, no_log=True, type='dict'),
-                name=dict(required=True),
-                mode=dict(required=True, choices=['create_pool','enable_service']),
+                edge_name=dict(required=True),
+                mode=dict(required=True, choices=['create_pool','enable_service','create_binding']),
                 ip_range=dict(),
                 default_gateway=dict(),
                 subnet=dict(required=True),
@@ -151,7 +251,11 @@ def main():
                 syslog_enabled=dict(default='yes', choices=['yes', 'no']),
                 syslog_level=dict(default='info', choices=['emergency', 'alert', 'critical', 'error', 'warning', 'notice', 'info', 'debug']),
                 next_server=dict(),
-                bootfile=dict()
+                bootfile=dict(),
+                vmId=dict(),
+                vnicID=dict(),
+                hostname=dict(),
+                ip_addr=dict()
             ),
             supports_check_mode=False
     )
@@ -163,13 +267,19 @@ def main():
                                module.params['nsxmanager_spec']['password'])
 
     changed = False
-    edge_id, edge_params = get_edge(client_session, module.params['name'])
+    edge_id, edge_params = get_edge(client_session, module.params['edge_name'])
 
     if module.params['mode'] == 'create_pool':
-        changed =  add_dhcp_pool(client_session, module.params['name'], module.params['ip_range'], module.params['default_gateway'], module.params['subnet'], module.params['domain_name'], module.params['dns_server_1'], module.params['dns_server_2'], module.params['lease_time'], module.params['auto_dns'], module.params['next_server'], module.params['bootfile'])
+        changed =  add_dhcp_pool(client_session, module.params['edge_name'], module.params['ip_range'], module.params['default_gateway'], module.params['subnet'],
+                                 module.params['domain_name'], module.params['dns_server_1'], module.params['dns_server_2'], module.params['lease_time'],
+                                 module.params['auto_dns'], module.params['next_server'], module.params['bootfile'])
     elif module.params['mode'] == 'enable_service':
-        changed = dhcp_service(client_session, module.params['name'], module.params['dhcp_enabled'], module.params['syslog_enabled'], module.params['syslog_level'])
-    
+        changed = dhcp_server(client_session, module.params['edge_name'], module.params['dhcp_enabled'], module.params['syslog_enabled'], module.params['syslog_level'])
+    elif module.params['mode'] == 'create_binding':
+        changed = add_dhcp_static_binding(client_session, module.params['edge_name'], module.params['vm_id'], module.params['vnic_id'], module.params['ip_addr'],
+                                        module.params['hostname'], module.params['default_gateway'], module.params['domain_name'], module.params['dns_server_1'],
+                                        module.params['dns_server_2'], module.params['lease_time'], module.params['subnet'], module.params['auto_dns'])
+
     if changed:
         module.exit_json(changed=True)
     else:
